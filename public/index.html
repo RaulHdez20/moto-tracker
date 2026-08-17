@@ -130,6 +130,48 @@
       border: 3px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.3);
     }
     .tracker-marker svg { width: 16px; height: 16px; fill: #fff; }
+
+    /* ---------- Panel de administración ---------- */
+    #admin-overlay {
+      position: fixed; inset: 0; z-index: 2000; display: none;
+      background: rgba(0,0,0,0.35); align-items: flex-end; justify-content: center;
+    }
+    #admin-overlay.show { display: flex; }
+    #admin-panel {
+      width: 100%; max-width: 480px; max-height: 82vh; background: #fff;
+      border-radius: 22px 22px 0 0; display: flex; flex-direction: column;
+      box-shadow: 0 -12px 30px rgba(0,0,0,0.2); animation: slideup 0.2s ease-out;
+    }
+    @keyframes slideup { from { transform: translateY(24px); opacity: 0.6; } to { transform: translateY(0); opacity: 1; } }
+    #admin-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 18px 20px 12px 20px; border-bottom: 1px solid var(--line);
+    }
+    #admin-header h2 { margin: 0; font-size: 1.05rem; }
+    #admin-close {
+      width: 32px; height: 32px; border-radius: 50%; border: none; background: #f2f2f7;
+      color: var(--muted); font-size: 1rem; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    }
+    #admin-body { overflow-y: auto; padding: 8px 20px 24px 20px; }
+    .admin-device-row { padding: 14px 0; border-bottom: 1px solid var(--line); }
+    .admin-device-row:last-child { border-bottom: none; }
+    .admin-device-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .admin-device-head .device-dot { flex-shrink: 0; }
+    .admin-device-head .name { font-weight: 700; font-size: 0.92rem; }
+    .icon-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+    .icon-choice {
+      width: 40px; height: 40px; border-radius: 12px; border: 2px solid transparent;
+      background: #f2f2f7; display: flex; align-items: center; justify-content: center;
+      cursor: pointer; transition: 0.15s;
+    }
+    .icon-choice.selected { border-color: var(--accent); background: #e5f0ff; }
+    .icon-choice svg { width: 18px; height: 18px; fill: #1c1c1e; }
+    .color-strip { display: flex; gap: 6px; margin-top: 10px; }
+    .color-dot-choice {
+      width: 22px; height: 22px; border-radius: 50%; cursor: pointer; border: 2px solid transparent;
+    }
+    .color-dot-choice.selected { border-color: #1c1c1e; }
+    #admin-empty { text-align: center; color: var(--muted); font-size: 0.88rem; padding: 32px 0; }
   </style>
 </head>
 <body>
@@ -164,8 +206,20 @@
       <button id="btn-refresh" class="btn-glass" onclick="manualRefresh()" title="Actualizar">🔄</button>
       <button id="btn-autotrack" class="btn-glass on" title="Auto-cámara">🎯</button>
       <button id="btn-fitall" class="btn-glass" onclick="fitAllDevices()" title="Ver todos">⤢</button>
+      <button id="btn-admin" class="btn-glass" onclick="openAdminPanel()" title="Configuración">⚙️</button>
     </div>
 
+  </div>
+
+  <!-- Panel de administración: ícono y color por dispositivo -->
+  <div id="admin-overlay" onclick="if(event.target===this) closeAdminPanel()">
+    <div id="admin-panel">
+      <div id="admin-header">
+        <h2>Personalizar dispositivos</h2>
+        <button id="admin-close" onclick="closeAdminPanel()">✕</button>
+      </div>
+      <div id="admin-body"></div>
+    </div>
   </div>
 
   <!-- Panel inferior: selector de dispositivos -->
@@ -200,7 +254,37 @@
 
     const PALETTE = ['#007aff', '#ff9500', '#34c759', '#af52de', '#ff3b30', '#5ac8fa', '#ffcc00', '#ff2d55'];
 
+    // Biblioteca de íconos seleccionables por dispositivo. Todos son SVG propios
+    // embebidos (sin dependencias externas), así que siempre cargan.
+    const ICON_LIBRARY = {
+      moto:    { label: 'Moto',    path: 'M19.44 9.03L15.41 5H9.41v2h4.58l1.5 1.5H9.41l-1.5-1.5H4v2h1.83L4.13 12H2v2h1.05a3 3 0 105.9 0h6.1a3 3 0 105.88-.55L21 13.5V11l-1.56-1.97zM6.5 15.5A1.5 1.5 0 118 14a1.5 1.5 0 01-1.5 1.5zm11 0a1.5 1.5 0 111.5-1.5 1.5 1.5 0 01-1.5 1.5z' },
+      carro:   { label: 'Carro',   path: 'M5 11l1.5-4.5A2 2 0 018.4 5h7.2a2 2 0 011.9 1.5L19 11h1a1 1 0 011 1v5a1 1 0 01-1 1h-1a2 2 0 11-4 0H9a2 2 0 11-4 0H4a1 1 0 01-1-1v-5a1 1 0 011-1h1zm2.1-4.5L6 11h12l-1.1-4.5H7.1zM6.5 16a1 1 0 100-2 1 1 0 000 2zm11 0a1 1 0 100-2 1 1 0 000 2z' },
+      persona: { label: 'Persona', path: 'M12 12a4 4 0 100-8 4 4 0 000 8zm0 2c-4.4 0-8 2.2-8 5v2h16v-2c0-2.8-3.6-5-8-5z' },
+      bici:    { label: 'Bici',    path: 'M6 18a3 3 0 100-6 3 3 0 000 6zm12 0a3 3 0 100-6 3 3 0 000 6zM6.5 15l3-6h4l3 6M9 9h5m-2.5-2h3' },
+      camion:  { label: 'Camión',  path: 'M3 7h11v7h1.2a2 2 0 013.8.6V16h-2a2 2 0 11-4 0H8a2 2 0 11-4 0H3V7zm11 2v3h4.4L17 9h-3zM6 16a1 1 0 100-2 1 1 0 000 2zm10 0a1 1 0 100-2 1 1 0 000 2z' },
+      dron:    { label: 'Dron',    path: 'M9 9a2 2 0 114 0 2 2 0 01-4 0zm2 2v6m-6-2h4m4 0h4M5 5l3 3M19 5l-3 3M5 19l3-3M19 19l-3-3M4 5a1 1 0 100-2 1 1 0 000 2zm16 0a1 1 0 100-2 1 1 0 000 2zM4 19a1 1 0 100-2 1 1 0 000 2zm16 0a1 1 0 100-2 1 1 0 000 2z' },
+      barco:   { label: 'Barco',   path: 'M5 14l-1.5 3.5A9 9 0 0012 20a9 9 0 008.5-2.5L19 14H5zm2-1h10V6l-5-2-5 2v7z' },
+      pin:     { label: 'Genérico', path: 'M12 2a7 7 0 00-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 00-7-7zm0 9.5A2.5 2.5 0 1112 6.5a2.5 2.5 0 010 5z' }
+    };
+    const DEFAULT_ICON_KEY = 'moto';
+
+    // Personalización por dispositivo: se guarda en localStorage para
+    // que el panel de administración persista entre sesiones.
+    const PREFS_KEY = 'tracker_device_prefs_v1';
+    let devicePrefs = {};
+    try { devicePrefs = JSON.parse(localStorage.getItem(PREFS_KEY)) || {}; } catch (e) { devicePrefs = {}; }
+
+    function savePrefs() {
+      try { localStorage.setItem(PREFS_KEY, JSON.stringify(devicePrefs)); } catch (e) { /* almacenamiento no disponible */ }
+    }
+    function prefsFor(id) {
+      if (!devicePrefs[id]) devicePrefs[id] = {};
+      return devicePrefs[id];
+    }
+
     function colorForDevice(id) {
+      const custom = devicePrefs[id]?.color;
+      if (custom) return custom;
       if (deviceColors[id]) return deviceColors[id];
       let hash = 0;
       for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
@@ -209,17 +293,27 @@
       return color;
     }
 
+    function iconKeyForDevice(id) {
+      return devicePrefs[id]?.icon || DEFAULT_ICON_KEY;
+    }
+
     // Ícono SVG embebido: no depende de recursos externos, siempre carga.
     function buildIcon(id) {
       const color = colorForDevice(id);
+      const iconDef = ICON_LIBRARY[iconKeyForDevice(id)] || ICON_LIBRARY[DEFAULT_ICON_KEY];
       const html = `
         <div class="tracker-marker">
           <div class="pulse" style="background:${color};"></div>
           <div class="puck" style="background:${color};">
-            <svg viewBox="0 0 24 24"><path d="M19.44 9.03L15.41 5H9.41v2h4.58l1.5 1.5H9.41l-1.5-1.5H4v2h1.83L4.13 12H2v2h1.05a3 3 0 105.9 0h6.1a3 3 0 105.88-.55L21 13.5V11l-1.56-1.97zM6.5 15.5A1.5 1.5 0 118 14a1.5 1.5 0 01-1.5 1.5zm11 0a1.5 1.5 0 111.5-1.5 1.5 1.5 0 01-1.5 1.5z"/></svg>
+            <svg viewBox="0 0 24 24"><path d="${iconDef.path}"/></svg>
           </div>
         </div>`;
       return L.divIcon({ html, className: '', iconSize: [38, 38], iconAnchor: [19, 19] });
+    }
+
+    function applyDeviceAppearance(id) {
+      if (markers[id]) markers[id].setIcon(buildIcon(id));
+      if (polylines[id]) polylines[id].setStyle({ color: colorForDevice(id) });
     }
 
     function batteryClass(level) {
@@ -302,6 +396,71 @@
         `;
         menuContainer.appendChild(card);
       });
+    }
+
+    // ---------- Panel de administración ----------
+    function openAdminPanel() {
+      renderAdminPanel();
+      document.getElementById('admin-overlay').classList.add('show');
+    }
+    function closeAdminPanel() {
+      document.getElementById('admin-overlay').classList.remove('show');
+    }
+
+    function renderAdminPanel() {
+      const body = document.getElementById('admin-body');
+      const ids = Object.keys(latestData);
+
+      if (ids.length === 0) {
+        body.innerHTML = `<div id="admin-empty">Todavía no hay dispositivos reportando ubicación.</div>`;
+        return;
+      }
+
+      body.innerHTML = ids.map(id => {
+        const activeIcon = iconKeyForDevice(id);
+        const activeColor = colorForDevice(id);
+
+        const iconButtons = Object.entries(ICON_LIBRARY).map(([key, def]) => `
+          <button class="icon-choice ${key === activeIcon ? 'selected' : ''}"
+                  title="${def.label}"
+                  onclick="setDeviceIcon('${id}', '${key}')">
+            <svg viewBox="0 0 24 24"><path d="${def.path}"/></svg>
+          </button>
+        `).join('');
+
+        const colorButtons = PALETTE.map(color => `
+          <div class="color-dot-choice ${color === activeColor ? 'selected' : ''}"
+               style="background:${color};"
+               onclick="setDeviceColor('${id}', '${color}')"></div>
+        `).join('');
+
+        return `
+          <div class="admin-device-row">
+            <div class="admin-device-head">
+              <div class="device-dot" style="width:14px;height:14px;background:${activeColor};"></div>
+              <div class="name">${id}</div>
+            </div>
+            <div class="icon-grid">${iconButtons}</div>
+            <div class="color-strip">${colorButtons}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function setDeviceIcon(id, key) {
+      prefsFor(id).icon = key;
+      savePrefs();
+      applyDeviceAppearance(id);
+      renderAdminPanel();
+      renderDeviceMenu();
+    }
+
+    function setDeviceColor(id, color) {
+      prefsFor(id).color = color;
+      savePrefs();
+      applyDeviceAppearance(id);
+      renderAdminPanel();
+      renderDeviceMenu();
     }
 
     // ---------- Estado de conexión ----------
