@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Rastreador de Moto</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #000; color: #fff; }
+    #map { height: calc(100vh - 80px); width: 100vw; }
+    #status-bar {
+      height: 80px; background: #1c1c1e; display: flex;
+      justify-content: space-around; align-items: center; border-top: 1px solid #333;
+    }
+    .stat { text-align: center; }
+    .stat-val { font-size: 1.15rem; font-weight: 700; color: #30d158; }
+    .stat-lbl { font-size: 0.7rem; color: #8e8e93; text-transform: uppercase; margin-top: 2px; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="status-bar">
+    <div class="stat"><div class="stat-val" id="speed">0 km/h</div><div class="stat-lbl">Velocidad</div></div>
+    <div class="stat"><div class="stat-val" id="battery">--%</div><div class="stat-lbl">Batería</div></div>
+    <div class="stat"><div class="stat-val" id="time">--:--:--</div><div class="stat-lbl">Última Señal</div></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    // Inicializar mapa centrado por defecto
+    const map = L.map('map').setView([19.0433, -98.198], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+
+    let marker = null;
+    let polyline = L.polyline([], { color: '#007aff', weight: 4 }).addTo(map);
+    let firstFocus = false;
+
+    async function fetchTrackerData() {
+      try {
+        const res = await fetch('/api/live');
+        const data = await res.json();
+        if (!data.current) return;
+
+        const { lat, lon, speed, battery, timestamp } = data.current;
+        const latLng = [lat, lon];
+
+        if (!marker) {
+          marker = L.marker(latLng).addTo(map);
+        } else {
+          marker.setLatLng(latLng);
+        }
+
+        if (!firstFocus) {
+          map.setView(latLng, 16);
+          firstFocus = true;
+        }
+
+        // Trazar línea de ruta
+        const path = data.history.map(p => [p.lat, p.lon]);
+        polyline.setLatLngs(path);
+
+        // Actualizar datos en pantalla
+        document.getElementById('speed').innerText = `${Math.round(speed * 3.6)} km/h`;
+        document.getElementById('battery').innerText = `${battery}%`;
+        document.getElementById('time').innerText = new Date(timestamp).toLocaleTimeString();
+      } catch (err) {
+        console.error('Error al actualizar datos:', err);
+      }
+    }
+
+    setInterval(fetchTrackerData, 2000);
+    fetchTrackerData();
+  </script>
+</body>
+</html>
