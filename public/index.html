@@ -1,220 +1,147 @@
 <!DOCTYPE html>
 <html lang="es">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <title>Rastreador Familiar Mínimo</title>
-        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-        <style>
-            * { box-sizing: border-box; }
-            body { 
-            margin: 0; padding: 0; 
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
-            background: #f4f5f7; color: #1c1c1e; 
-            display: flex; flex-direction: column; height: 100vh; 
-            }
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Tracker</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    * { box-sizing: border-box; }
+    body { 
+      margin: 0; padding: 0; 
+      font-family: 'Courier New', Courier, monospace; 
+      background: #000; color: #fff; 
+      display: flex; flex-direction: column; height: 100vh;
+    }
+    
+    /* Indicadores Visibles de Seguimiento de Navegación */
+    #navigation-tracking-indicators {
+      background: #000;
+      border-bottom: 4px solid #1919A6;
+      padding: 12px;
+      display: flex; gap: 10px;
+      z-index: 1000;
+      overflow-x: auto;
+    }
+    .nav-indicator { 
+      background: #000; border: 2px solid #FFCC00; color: #FFCC00; 
+      padding: 5px 15px; border-radius: 20px; font-weight: bold; text-transform: uppercase; font-size: 0.9rem; 
+    }
+    
+    /* Layout Pac-Man */
+    #pacman-layout-wrapper { 
+      position: relative; flex-grow: 1; border: 4px solid #1919A6; margin: 5px; border-radius: 8px;
+    }
+    #map { height: 100%; width: 100%; background: #000; border-radius: 4px; }
+    
+    .floating-btn { 
+      position: absolute; z-index: 1000; background: #000; border: 2px solid #00e5ff; 
+      color: #00e5ff; font-weight: bold; padding: 8px 12px; border-radius: 8px; cursor: pointer; text-transform: uppercase; 
+      top: 15px; right: 15px;
+    }
+    .floating-btn.on { background: #00e5ff; color: #000; }
+
+    /* Componente de Sección de Comida */
+    #food-section-component {
+      height: 90px; background: #000; display: flex; justify-content: space-around; 
+      align-items: center; border-top: 4px solid #1919A6; margin: 0 5px 5px 5px; border-radius: 8px;
+    }
+    .stat { text-align: center; }
+    .stat-val { font-size: 1.3rem; font-weight: bold; color: #FFB8AE; }
+    .stat-lbl { font-size: 0.75rem; color: #fff; text-transform: uppercase; margin-top: 4px; }
+  </style>
+</head>
+<body>
+
+  <!-- Indicadores Visibles de Seguimiento de Navegación -->
+  <div id="navigation-tracking-indicators">
+    <div class="nav-indicator">App Activa: Rastreo</div>
+    <div id="current-tracking" class="nav-indicator" style="border-color: #00e5ff; color: #00e5ff;">Buscando...</div>
+  </div>
+
+  <!-- Layout Pac-Man -->
+  <div id="pacman-layout-wrapper">
+    <div id="map"></div>
+    <button id="btn-autotrack" class="floating-btn on">🎯 Auto-Cámara</button>
+  </div>
+
+  <!-- Componente de Sección de Comida -->
+  <div id="food-section-component">
+    <div class="stat"><div class="stat-val" id="val-food">0</div><div class="stat-lbl">Comida</div></div>
+    <div class="stat"><div class="stat-val" id="val-speed">0 km/h</div><div class="stat-lbl">Velocidad</div></div>
+    <div class="stat"><div class="stat-val" id="val-batt">--%</div><div class="stat-lbl">Batería</div></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const map = L.map('map', { zoomControl: false }).setView([19.0433, -98.198], 15);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
+
+    const iconPacman = L.icon({
+      iconUrl: 'https://upload.wikimedia.org/wikipedia/commons/4/49/Pacman.svg',
+      iconSize: [32, 32],
+      iconAnchor: [16, 16]
+    });
+
+    let markers = {};
+    let polylines = {};
+    let currentFocusId = null;
+    let autoTrack = true;
+
+    const btnAutoTrack = document.getElementById('btn-autotrack');
+    btnAutoTrack.onclick = () => {
+      autoTrack = !autoTrack;
+      btnAutoTrack.className = autoTrack ? 'floating-btn on' : 'floating-btn';
+    };
+
+    map.on('dragstart', () => { if (autoTrack) btnAutoTrack.click(); });
+
+    async function fetchTrackerData() {
+      try {
+        const res = await fetch('/api/live');
+        const data = await res.json();
+        
+        const deviceIds = Object.keys(data);
+        if (deviceIds.length === 0) return;
+
+        if (!currentFocusId) currentFocusId = deviceIds[0];
+        document.getElementById('current-tracking').innerText = `ID: ${currentFocusId}`;
+
+        deviceIds.forEach(id => {
+          const { current, history } = data[id];
+          if (!current) return;
+
+          const latLng = [current.lat, current.lon];
+
+          if (!markers[id]) {
+            markers[id] = L.marker(latLng, { icon: iconPacman }).addTo(map);
+          } else {
+            markers[id].setLatLng(latLng);
+          }
+
+          const path = history.map(p => [p.lat, p.lon]);
+          if (!polylines[id]) {
+            polylines[id] = L.polyline(path, { color: '#FFCC00', weight: 4, dashArray: '5, 15', lineCap: 'round' }).addTo(map);
+          } else {
+            polylines[id].setLatLngs(path);
+          }
+          
+          if(id === currentFocusId) {
+            document.getElementById('val-food').innerText = history.length;
+            document.getElementById('val-speed').innerText = `${Math.round(current.speed * 3.6)} km/h`;
+            document.getElementById('val-batt').innerText = `${current.battery}%`;
             
-            /* Indicadores Visibles de Seguimiento de Navegación */
-            #nav-header { 
-            background: #ffffff; 
-            border-bottom: 2px solid #e5e5ea; 
-            padding: 12px 15px; 
-            display: flex; flex-direction: column; gap: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.03);
-            z-index: 1000;
-            }
-            #tracking-indicator {
-            font-size: 0.85rem; font-weight: 600; color: #8e8e93; text-transform: uppercase; letter-spacing: 0.5px;
-            }
-            #tracking-indicator span { color: #007aff; font-weight: bold; }
-            
-            #tabs-container { display: flex; overflow-x: auto; gap: 8px; white-space: nowrap; padding-bottom: 4px; }
-            .nav-tab { 
-            background: #f2f2f7; border: 1px solid #e5e5ea; padding: 6px 16px; 
-            border-radius: 20px; font-weight: 600; cursor: pointer; font-size: 0.9rem; color: #8e8e93; transition: all 0.2s;
-            }
-            .nav-tab.active { background: #007aff; color: #ffffff; border-color: #007aff; box-shadow: 0 4px 8px rgba(0, 122, 255, 0.3); }
-            
-            /* Controles y Mapa */
-            #map-wrapper { position: relative; flex-grow: 1; }
-            #map { height: 100%; width: 100%; background: #e5e5ea; }
-            
-            .floating-btn { 
-            position: absolute; z-index: 1000; background: #ffffff; border: 1px solid #d1d1d6; 
-            color: #1c1c1e; font-weight: 600; padding: 10px 14px; border-radius: 12px; 
-            cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.1); display: flex; align-items: center; gap: 6px;
-            }
-            #btn-autotrack { top: 15px; right: 15px; }
-            #btn-autotrack.on { background: #007aff; color: #ffffff; border-color: #007aff; }
-            #btn-reload { top: 70px; right: 15px; }
+            if (autoTrack) map.setView(latLng);
+          }
+        });
+      } catch (err) {
+        console.error('Error fetching data:', err);
+      }
+    }
 
-            /* Sección de Comida y Telemetría */
-            #food-section { 
-            height: 90px; background: #ffffff; display: flex; justify-content: space-around; 
-            align-items: center; border-top: 3px solid #ffcc00; box-shadow: 0 -2px 10px rgba(0,0,0,0.03);
-            }
-            .stat { text-align: center; }
-            .stat-val { font-size: 1.3rem; font-weight: bold; color: #1c1c1e; }
-            .stat-lbl { font-size: 0.7rem; color: #8e8e93; text-transform: uppercase; margin-top: 4px; font-weight: 600; }
-        </style>
-        </head>
-    <body>
-
-        <!-- Navegación y Rastreo -->
-        <div id="nav-header">
-            <div id="tracking-indicator">Navegando hacia: <span id="current-tracking-name">---</span></div>
-            <div id="tabs-container"></div>
-        </div>
-
-        <div id="map-wrapper">
-            <div id="map"></div>
-            <button id="btn-autotrack" class="floating-btn on">🎯 Auto-Cámara</button>
-            <button id="btn-reload" class="floating-btn">🔄 Recargar</button>
-        </div>
-
-        <!-- Panel Inferior -->
-        <div id="food-section">
-            <div class="stat"><div class="stat-val" id="val-food">0</div><div class="stat-lbl">Comida (Ruta)</div></div>
-            <div class="stat"><div class="stat-val" id="val-speed">0 km/h</div><div class="stat-lbl">Velocidad</div></div>
-            <div class="stat"><div class="stat-val" id="val-batt">--%</div><div class="stat-lbl">Batería</div></div>
-            <div class="stat"><div class="stat-val" id="val-time">--:--</div><div class="stat-lbl">Última Señal</div></div>
-        </div>
-
-     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-        <script>
-            // Mapa claro minimalista
-            const map = L.map('map', { zoomControl: false }).setView([19.0433, -98.198], 15);
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
-
-            // Diseños de Marcadores
-            // Diseño a prueba de fallos usando un Emoji de moto
-                const iconMotoNegra = L.divIcon({
-                className: 'custom-emoji-icon',
-                html: "<div style='font-size: 32px; text-shadow: 0 0 5px rgba(0,0,0,0.3);'>🏍️</div>",
-                iconSize: [32, 32],
-                iconAnchor: [16, 16]
-                });
-
-            const iconPacman = L.icon({
-            iconUrl: 'https://upload.wikimedia.org/wikipedia/commons/4/49/Pacman.svg',
-            iconSize: [32, 32],
-            iconAnchor: [16, 16]
-            });
-
-            // CONFIGURACIÓN: Selecciona qué marcador corresponde a cada identificador
-            function obtenerIconoParaDispositivo(id) {
-            const idLimpio = id.toLowerCase().trim();
-            if (idLimpio === 'papa' || idLimpio === 'moto_papa') {
-                return iconMotoNegra;
-            }
-            // Diseño por defecto para los demás
-            return iconPacman;
-            }
-
-            let markers = {};
-            let polylines = {};
-            let currentFocusId = null;
-            let autoTrack = true;
-
-            const btnAutoTrack = document.getElementById('btn-autotrack');
-            btnAutoTrack.onclick = () => {
-            autoTrack = !autoTrack;
-            btnAutoTrack.className = autoTrack ? 'floating-btn on' : 'floating-btn';
-            };
-
-            document.getElementById('btn-reload').onclick = fetchTrackerData;
-
-            map.on('dragstart', () => {
-            if (autoTrack) btnAutoTrack.click();
-            });
-
-            function selectDevice(id) {
-            currentFocusId = id;
-            document.getElementById('current-tracking-name').innerText = id;
-            
-            document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
-            const activeTab = document.getElementById('tab-' + id);
-            if (activeTab) activeTab.classList.add('active');
-            
-            if (autoTrack && markers[id]) map.setView(markers[id].getLatLng(), 16);
-            updateTelemetryUI(id);
-            }
-
-            let lastData = {};
-
-            function updateTelemetryUI(id) {
-            if (!lastData[id] || !lastData[id].current) return;
-            const { speed, battery, timestamp } = lastData[id].current;
-            const historyLength = lastData[id].history.length;
-
-            document.getElementById('val-food').innerText = historyLength;
-            document.getElementById('val-speed').innerText = `${Math.round(speed * 3.6)} km/h`;
-            
-            const battEl = document.getElementById('val-batt');
-            battEl.innerText = `${battery}%`;
-            battEl.style.color = battery < 20 ? '#ff3b30' : '#1c1c1e';
-
-            document.getElementById('val-time').innerText = new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-            }
-
-            async function fetchTrackerData() {
-            try {
-                const res = await fetch('/api/live');
-                const data = await res.json();
-                lastData = data;
-                
-                const deviceIds = Object.keys(data);
-                if (deviceIds.length === 0) return;
-
-                const tabsContainer = document.getElementById('tabs-container');
-                if (tabsContainer.children.length !== deviceIds.length) {
-                tabsContainer.innerHTML = '';
-                deviceIds.forEach(id => {
-                    const btn = document.createElement('div');
-                    btn.className = 'nav-tab';
-                    btn.id = 'tab-' + id;
-                    btn.innerText = id;
-                    btn.onclick = () => selectDevice(id);
-                    tabsContainer.appendChild(btn);
-                });
-                }
-
-                if (!currentFocusId) currentFocusId = deviceIds[0];
-
-                deviceIds.forEach(id => {
-                const { current, history } = data[id];
-                if (!current) return;
-
-                const latLng = [current.lat, current.lon];
-
-                // Asignar el icono correcto según el ID
-                if (!markers[id]) {
-                    markers[id] = L.marker(latLng, { icon: obtenerIconoParaDispositivo(id) }).addTo(map);
-                } else {
-                    markers[id].setLatLng(latLng);
-                }
-
-                // Rastro punteado de "comida"
-                const path = history.map(p => [p.lat, p.lon]);
-                if (!polylines[id]) {
-                    polylines[id] = L.polyline(path, { color: '#ffcc00', weight: 5, dashArray: '1, 15', lineCap: 'round' }).addTo(map);
-                } else {
-                    polylines[id].setLatLngs(path);
-                }
-                });
-
-                if (autoTrack && markers[currentFocusId]) {
-                map.setView(markers[currentFocusId].getLatLng());
-                }
-
-                selectDevice(currentFocusId);
-            } catch (err) {
-                console.error('Error de actualización:', err);
-            }
-            }
-
-            setInterval(fetchTrackerData, 2000);
-            fetchTrackerData();
-        </script>
-    </body>
+    // Actualización exacta cada 2 segundos
+    setInterval(fetchTrackerData, 2000);
+    fetchTrackerData();
+  </script>
+</body>
 </html>
